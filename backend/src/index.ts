@@ -12,8 +12,12 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'lifeos-ai-super-secret-token-key-2035';
 
-app.use(cors());
+// Allow all origins (required for Render cross-service calls)
+app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
 app.use(express.json());
+
+// Health check endpoint (keep Render free tier awake)
+app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'LifeOS AI Backend', ts: Date.now() }));
 
 // Public Auth Endpoints
 app.post('/api/auth/register', async (req, res) => {
@@ -993,6 +997,7 @@ app.get('/api/lifescores', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`[LifeOS AI Server] Running on http://localhost:${PORT}`);
+// Bind to 0.0.0.0 so Render can route external traffic
+app.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`[LifeOS AI Server] Running on port ${PORT}`);
 });
