@@ -1,0 +1,356 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// To switch to MySQL, change the provider below to "mysql" and update the env URL.
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id               String             @id @default(uuid())
+  email            String             @unique
+  passwordHash     String
+  name             String
+  age              Int?
+  occupation       String?
+  timezone         String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  profileSetup     ProfileSetup?
+  goals            Goal[]
+  tasks            Task[]
+  habits           Habit[]
+  sleepLogs        SleepLog[]
+  moodLogs         MoodLog[]
+  learningSessions LearningSession[]
+  courses          Course[]
+  books            Book[]
+  digitalHabitLogs DigitalHabitLog[]
+  expenses         Expense[]
+  incomes          Income[]
+  budgets          Budget[]
+  fitnessLogs      FitnessLog[]
+  waterLogs        WaterLog[]
+  journalEntries   JournalEntry[]
+  achievements     UserAchievement[]
+  notifications    Notification[]
+  insights         AIInsight[]
+  predictions      Prediction[]
+  lifeScores       LifeScoreHistory[]
+  deviceTokens     DeviceToken[]
+}
+
+model ProfileSetup {
+  id                          String  @id @default(uuid())
+  userId                      String  @unique
+  user                        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferredWorkingHoursStart  String?
+  preferredWorkingHoursEnd    String?
+  lifeGoals                   String?
+  skills                      String?
+  interests                   String?
+}
+
+model Goal {
+  id           String           @id @default(uuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?
+  category     String // CAREER, LEARNING, HEALTH, FINANCE, TRAVEL, PERSONAL
+  priority     String // LOW, MEDIUM, HIGH
+  status       String // TODO, IN_PROGRESS, COMPLETED
+  progress     Float            @default(0)
+  deadline     DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  suggestions  GoalSuggestion[]
+}
+
+model GoalSuggestion {
+  id             String   @id @default(uuid())
+  goalId         String
+  goal           Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  suggestionText String
+  accepted       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+}
+
+model Task {
+  id                String        @id @default(uuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title             String
+  description       String?
+  category          String // PRODUCTIVITY, PERSONAL, WORK, HEALTH, LEARNING
+  priority          String // LOW, MEDIUM, HIGH
+  difficulty        String // EASY, MEDIUM, HARD
+  energyNeeded      String // LOW, MEDIUM, HIGH
+  estimatedTimeMs   BigInt? // Estimated time in ms
+  plannedTime       DateTime?
+  actualTime        DateTime?
+  delay             Float? // delay in minutes or percentage
+  completionPercent Float         @default(0)
+  isRecurring       Boolean       @default(false)
+  recurrencePattern String? // DAILY, WEEKLY, MONTHLY
+  status            String // TODO, IN_PROGRESS, COMPLETED
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  history           TaskHistory[]
+}
+
+model TaskHistory {
+  id                 String   @id @default(uuid())
+  taskId             String
+  task               Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  statusChangedFrom  String
+  statusChangedTo    String
+  changedAt          DateTime @default(now())
+  notes              String?
+}
+
+model Habit {
+  id          String     @id @default(uuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  frequency   String // DAILY, WEEKLY, MONTHLY
+  targetCount Int        @default(1)
+  streakCount Int        @default(0)
+  maxStreak   Int        @default(0)
+  category    String // HEALTH, PRODUCTIVITY, LEARNING, MINDFULNESS
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  logs        HabitLog[]
+}
+
+model HabitLog {
+  id          String   @id @default(uuid())
+  habitId     String
+  habit       Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  completedAt DateTime @default(now())
+  status      String // COMPLETED, SKIPPED
+  notes       String?
+}
+
+model SleepLog {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sleepTime       DateTime
+  wakeTime        DateTime
+  durationMinutes Int
+  qualityScore    Int // 0 - 100
+  dreamNotes      String?
+  sleepScore      Int // 0 - 100
+  createdAt       DateTime @default(now())
+}
+
+model MoodLog {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji            String
+  stressLevel      Int // 1 - 10
+  energyLevel      Int // 1 - 10
+  confidenceLevel  Int // 1 - 10
+  motivationLevel  Int // 1 - 10
+  journalSnippet   String?
+  createdAt        DateTime @default(now())
+}
+
+model Course {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  platform       String?
+  url            String?
+  status         String // TODO, IN_PROGRESS, COMPLETED
+  progress       Float    @default(0)
+  certificateUrl String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Book {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  author      String?
+  totalPages  Int
+  currentPage Int      @default(0)
+  progress    Float    @default(0)
+  status      String // READING, TO_READ, COMPLETED
+  rating      Int?
+  review      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model LearningSession {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category        String // CODING, SQL, DSA, AI, REACT, OTHER
+  durationMinutes Int
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model DigitalHabitLog {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applicationName String // INSTAGRAM, YOUTUBE, NETFLIX, LINKEDIN, CHATGPT, VSCODE, CHROME, GAMING
+  durationMinutes Int
+  category        String // PRODUCTIVE, DISTRACTING
+  loggedDate      DateTime
+}
+
+model Expense {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount          Float
+  category        String // FOOD, ENTERTAINMENT, RENT, BILLS, SHOPPING, HEALTH, TRAVEL, OTHER
+  merchant        String?
+  description     String?
+  isSubscription  Boolean  @default(false)
+  transactionDate DateTime
+}
+
+model Income {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount          Float
+  source          String // SALARY, INVESTMENT, FREELANCE, SIDE_HUSTLE, OTHER
+  description     String?
+  transactionDate DateTime
+}
+
+model Budget {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    String // Food, Entertainment, Bills, etc. Or TOTAL
+  amountLimit Float
+  period      String // WEEKLY, MONTHLY
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FitnessLog {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workoutType    String? // RUNNING, WEIGHTS, CARDIO, YOGA, CYCLING
+  durationMinutes Int?
+  caloriesBurned Int?
+  weightKg       Float?
+  steps          Int?
+  bmi            Float?
+  healthScore    Int? // 0 - 100
+  loggedDate     DateTime
+}
+
+model WaterLog {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountMl   Int
+  loggedDate DateTime
+}
+
+model JournalEntry {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entryDate        DateTime
+  reflections      String
+  gratitudeContent String?
+  achievements     String?
+  failures         String?
+  lessonsLearned   String?
+  moodEmoji        String?
+  audioNoteUrl     String?
+}
+
+model Achievement {
+  id           String            @id @default(uuid())
+  title        String
+  description  String
+  category     String // PRODUCTIVITY, FITNESS, HABITS, LEARNING, FINANCE, JOURNAL
+  xpReward     Int
+  badgeIconUrl String?
+  users        UserAchievement[]
+}
+
+model UserAchievement {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  unlockedAt    DateTime    @default(now())
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String // SMART, SYSTEM, DEADLINE, ALERT
+  isRead    Boolean   @default(false)
+  triggerAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model AIInsight {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text            String
+  type            String // PRODUCTIVITY, HABITS, SLEEP, MOOD, FINANCE, FITNESS, DIGITAL
+  confidenceScore Float    @default(1.0)
+  createdAt       DateTime @default(now())
+}
+
+model Prediction {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  target          String // GOAL_COMPLETION, BURNOUT_RISK, FOCUS_SCORE, SAVINGS
+  value           String // Probabilities or numbers (e.g. "82%", "Low Risk")
+  confidenceScore Float    @default(1.0)
+  createdAt       DateTime @default(now())
+}
+
+model LifeScoreHistory {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  overallScore      Int
+  productivityScore Int
+  healthScore       Int
+  financeScore      Int
+  learningScore     Int
+  loggedDate        DateTime
+}
+
+model DeviceToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String
+  deviceType String
+  createdAt  DateTime @default(now())
+}
