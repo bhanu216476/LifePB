@@ -5,8 +5,8 @@ services:
     env: node
     region: oregon
     plan: free
-    buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: npx prisma db push --skip-generate && node dist/backend/src/index.js
+    buildCommand: npm install && npx prisma generate
+    startCommand: npx prisma db push --skip-generate && npx tsx backend/src/index.ts
     envVars:
       - key: PORT
         value: 10000
