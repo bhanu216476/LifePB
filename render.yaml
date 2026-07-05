@@ -1,11 +1,11 @@
 services:
-  # ── Backend Web Service ──
+  # ── Full Stack Web Service ──
   - type: web
     name: lifeos-ai-backend
     env: node
     region: oregon
     plan: free
-    buildCommand: npm install && npx prisma generate
+    buildCommand: npm install && cd frontend && npm install && npm run build && cd .. && npx prisma generate
     startCommand: npx prisma db push --skip-generate && npx tsx backend/src/index.ts
     envVars:
       - key: PORT
@@ -16,17 +16,3 @@ services:
         generateValue: true
       - key: NODE_ENV
         value: production
-
-  # ── Frontend Static Site ──
-  - type: web
-    name: lifeos-ai-frontend
-    env: static
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: ./frontend/dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: VITE_API_URL
-        sync: false
