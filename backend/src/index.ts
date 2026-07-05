@@ -6,7 +6,6 @@ import { PrismaClient } from '@prisma/client';
 import { authenticateToken, AuthenticatedRequest } from './middleware/auth';
 import { generateAIInsights } from './services/insightEngine';
 import { generateAIPredictions } from './services/predictionEngine';
-import path from 'path';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -16,9 +15,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'lifeos-ai-super-secret-token-key-2
 // Allow all origins (required for Render cross-service calls)
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
 app.use(express.json());
-
-// Serve static files from the React frontend app
-app.use(express.static(path.join(process.cwd(), 'frontend', 'dist')));
 
 // Health check endpoint (keep Render free tier awake)
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'LifeOS AI Backend', ts: Date.now() }));
@@ -999,11 +995,6 @@ app.get('/api/lifescores', async (req: AuthenticatedRequest, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Error fetching life score trends' });
   }
-});
-
-// Catch-all route to serve React app for non-API requests
-app.get('*', (req, res) => {
-  res.sendFile(path.join(process.cwd(), 'frontend', 'dist', 'index.html'));
 });
 
 // Bind to 0.0.0.0 so Render can route external traffic

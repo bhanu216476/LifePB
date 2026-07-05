@@ -1,11 +1,11 @@
 services:
-  # ── Full Stack Web Service ──
+  # ── Backend Web Service ──
   - type: web
     name: lifeos-ai-backend
     env: node
     region: oregon
     plan: free
-    buildCommand: NODE_ENV=development npm install && cd frontend && NODE_ENV=development npm install && npm run build && cd .. && npx prisma generate
+    buildCommand: npm install && npx prisma generate
     startCommand: npx prisma db push --skip-generate && npx tsx backend/src/index.ts
     envVars:
       - key: PORT
