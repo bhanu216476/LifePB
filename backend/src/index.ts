@@ -8,6 +8,10 @@ import { generateAIInsights } from './services/insightEngine';
 import { generateAIPredictions } from './services/predictionEngine';
 import path from 'path';
 
+import { startNotificationScheduler, checkAndSendNotifications } from './services/notificationScheduler';
+import { getPublicKey } from './services/pushService';
+import { updateDailyProgress, getLocalMidnight } from './services/progressService';
+
 const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -22,6 +26,53 @@ app.use(express.static(path.join(process.cwd(), 'frontend', 'dist')));
 
 // Health check endpoint (keep Render free tier awake)
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'LifeOS AI Backend', ts: Date.now() }));
+
+// Helper to track user logins, counts, and calculate daily streak
+async function trackUserLogin(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return;
+
+  const today = new Date();
+  const tz = user.timezone || 'UTC';
+  
+  // Calculate local date (midnight) for today and last login
+  let localToday;
+  try {
+    localToday = new Date(today.toLocaleDateString('en-US', { timeZone: tz }));
+  } catch (e) {
+    localToday = new Date(today.toLocaleDateString('en-US', { timeZone: 'UTC' }));
+  }
+  localToday.setHours(0, 0, 0, 0);
+
+  let newStreak = user.streak;
+  if (user.lastLogin) {
+    let localLastLogin;
+    try {
+      localLastLogin = new Date(user.lastLogin.toLocaleDateString('en-US', { timeZone: tz }));
+    } catch (e) {
+      localLastLogin = new Date(user.lastLogin.toLocaleDateString('en-US', { timeZone: 'UTC' }));
+    }
+    localLastLogin.setHours(0, 0, 0, 0);
+
+    const diffDays = Math.round((localToday.getTime() - localLastLogin.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays === 1) {
+      newStreak += 1;
+    } else if (diffDays > 1) {
+      newStreak = 1; // streak reset
+    }
+  } else {
+    newStreak = 1; // first login
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      loginCount: { increment: 1 },
+      lastLogin: today,
+      streak: newStreak,
+    },
+  });
+}
 
 // Public Auth Endpoints
 app.post('/api/auth/register', async (req, res) => {
@@ -41,6 +92,7 @@ app.post('/api/auth/register', async (req, res) => {
         age: age ? parseInt(age) : null,
         occupation,
         timezone,
+        authProvider: 'EMAIL',
         profileSetup: {
           create: {
             preferredWorkingHoursStart: '09:00',
@@ -50,8 +102,23 @@ app.post('/api/auth/register', async (req, res) => {
       },
     });
 
+    await trackUserLogin(user.id);
+    const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
+
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name } });
+    res.status(201).json({
+      token,
+      user: {
+        id: updatedUser!.id,
+        email: updatedUser!.email,
+        name: updatedUser!.name,
+        streak: updatedUser!.streak,
+        notificationEnabled: updatedUser!.notificationEnabled,
+        reminderTimes: updatedUser!.reminderTimes,
+        authProvider: updatedUser!.authProvider,
+        profilePicture: updatedUser!.profilePicture
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: 'Server registration error' });
   }
@@ -65,15 +132,123 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email or password' });
     }
 
+    // Google-only accounts shouldn't log in with password
+    if (user.authProvider === 'GOOGLE' && !user.passwordHash) {
+      return res.status(400).json({ error: 'This account uses Google Sign-In. Please click "Continue with Google".' });
+    }
+
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
       return res.status(400).json({ error: 'Invalid email or password' });
     }
 
+    await trackUserLogin(user.id);
+    const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
+
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+    res.json({
+      token,
+      user: {
+        id: updatedUser!.id,
+        email: updatedUser!.email,
+        name: updatedUser!.name,
+        streak: updatedUser!.streak,
+        notificationEnabled: updatedUser!.notificationEnabled,
+        reminderTimes: updatedUser!.reminderTimes,
+        authProvider: updatedUser!.authProvider,
+        profilePicture: updatedUser!.profilePicture
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: 'Server login error' });
+  }
+});
+
+app.post('/api/auth/google', async (req, res) => {
+  const { credential, name: customName, email: customEmail, picture: customPicture, timezone } = req.body;
+  try {
+    let email = '';
+    let name = '';
+    let picture = '';
+
+    if (credential && credential.startsWith('mock_google_')) {
+      // Mock Google Login for development/testing
+      const parts = credential.split('_');
+      email = parts[2] || 'mock@gmail.com';
+      name = parts[3] || 'Mock Google User';
+      picture = parts[4] || 'https://lh3.googleusercontent.com/a/default-user=s96-c';
+    } else if (credential) {
+      // Real Google verification
+      const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
+      if (!verifyRes.ok) {
+        return res.status(400).json({ error: 'Invalid Google Credential Token' });
+      }
+      const payload: any = await verifyRes.json();
+      email = payload.email;
+      name = payload.name;
+      picture = payload.picture || 'https://lh3.googleusercontent.com/a/default-user=s96-c';
+    } else {
+      // Direct mock if credential is empty but email/name are supplied (from developer interface)
+      email = customEmail || 'developer@lifeos.ai';
+      name = customName || 'Developer Mode';
+      picture = customPicture || 'https://lh3.googleusercontent.com/a/default-user=s96-c';
+    }
+
+    if (!email) {
+      return res.status(400).json({ error: 'Failed to retrieve email from Google Account' });
+    }
+
+    let user = await prisma.user.findUnique({ where: { email } });
+
+    if (!user) {
+      // Register new Google user
+      user = await prisma.user.create({
+        data: {
+          email,
+          passwordHash: '', // Login via Google has empty hash
+          name,
+          profilePicture: picture,
+          authProvider: 'GOOGLE',
+          timezone: timezone || 'UTC',
+          profileSetup: {
+            create: {
+              preferredWorkingHoursStart: '09:00',
+              preferredWorkingHoursEnd: '17:00',
+            },
+          },
+        },
+      });
+    } else {
+      // Update profile picture and authProvider for existing user if not already set
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          profilePicture: picture || user.profilePicture,
+          authProvider: user.authProvider === 'EMAIL' ? 'EMAIL' : 'GOOGLE', // Keep original EMAIL if they registered by email first, but let them login
+        },
+      });
+    }
+
+    await trackUserLogin(user.id);
+    const updatedUser = await prisma.user.findUnique({ where: { id: user.id } });
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({
+      token,
+      user: {
+        id: updatedUser!.id,
+        email: updatedUser!.email,
+        name: updatedUser!.name,
+        streak: updatedUser!.streak,
+        notificationEnabled: updatedUser!.notificationEnabled,
+        reminderTimes: updatedUser!.reminderTimes,
+        authProvider: updatedUser!.authProvider,
+        profilePicture: updatedUser!.profilePicture
+      }
+    });
+  } catch (error) {
+    console.error('Google login error:', error);
+    res.status(500).json({ error: 'Server Google login error' });
   }
 });
 
@@ -122,12 +297,178 @@ app.post('/api/auth/profile', async (req: AuthenticatedRequest, res) => {
   }
 });
 
+// Session Validation
+app.get('/api/auth/validate', async (req: AuthenticatedRequest, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        streak: true,
+        notificationEnabled: true,
+        reminderTimes: true,
+        authProvider: true,
+        profilePicture: true,
+        timezone: true
+      }
+    });
+    if (!user) return res.status(401).json({ error: 'Session expired' });
+    res.json({ valid: true, user });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error validating session' });
+  }
+});
+
+// Notification Preferences
+app.get('/api/notifications/settings', async (req: AuthenticatedRequest, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { notificationEnabled: true, reminderTimes: true }
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching settings' });
+  }
+});
+
+app.post('/api/notifications/settings', async (req: AuthenticatedRequest, res) => {
+  const { notificationEnabled, reminderTimes } = req.body;
+  try {
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: {
+        notificationEnabled: !!notificationEnabled,
+        reminderTimes: reminderTimes || "09:00,14:00,20:00"
+      },
+      select: { notificationEnabled: true, reminderTimes: true }
+    });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Error updating settings' });
+  }
+});
+
+// VAPID & Subscriptions
+app.get('/api/notifications/vapid-key', (_req, res) => {
+  try {
+    const publicKey = getPublicKey();
+    res.json({ publicKey });
+  } catch (error) {
+    res.status(500).json({ error: 'Error getting VAPID public key' });
+  }
+});
+
+app.post('/api/notifications/subscribe', async (req: AuthenticatedRequest, res) => {
+  const { subscription, deviceType } = req.body;
+  if (!subscription) {
+    return res.status(400).json({ error: 'Subscription is required' });
+  }
+  try {
+    const tokenStr = typeof subscription === 'string' ? subscription : JSON.stringify(subscription);
+    const existing = await prisma.deviceToken.findFirst({
+      where: { userId: req.userId!, token: tokenStr }
+    });
+    if (existing) {
+      return res.json({ success: true, message: 'Already subscribed' });
+    }
+    const deviceToken = await prisma.deviceToken.create({
+      data: {
+        userId: req.userId!,
+        token: tokenStr,
+        deviceType: deviceType || 'web'
+      }
+    });
+    res.status(201).json(deviceToken);
+  } catch (error) {
+    res.status(500).json({ error: 'Error registering push subscription' });
+  }
+});
+
+app.post('/api/notifications/unsubscribe', async (req: AuthenticatedRequest, res) => {
+  const { subscription } = req.body;
+  if (!subscription) {
+    return res.status(400).json({ error: 'Subscription is required' });
+  }
+  try {
+    const tokenStr = typeof subscription === 'string' ? subscription : JSON.stringify(subscription);
+    await prisma.deviceToken.deleteMany({
+      where: { userId: req.userId!, token: tokenStr }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error removing subscription' });
+  }
+});
+
+// Test Trigger manually
+app.post('/api/notifications/test-trigger', async (req: AuthenticatedRequest, res) => {
+  try {
+    await checkAndSendNotifications();
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// User Engagement Summary
+app.get('/api/activity/summary', async (req: AuthenticatedRequest, res) => {
+  const userId = req.userId!;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { loginCount: true, lastLogin: true, streak: true, timezone: true }
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const tz = user.timezone || 'UTC';
+    const localMidnight = getLocalMidnight(tz);
+
+    const sevenDaysAgo = new Date(localMidnight.getTime() - 6 * 24 * 60 * 60 * 1000);
+    const weeklyLogs = await prisma.progress.findMany({
+      where: { userId, date: { gte: sevenDaysAgo } },
+      orderBy: { date: 'asc' }
+    });
+
+    const thirtyDaysAgo = new Date(localMidnight.getTime() - 29 * 24 * 60 * 60 * 1000);
+    const monthlyLogs = await prisma.progress.findMany({
+      where: { userId, date: { gte: thirtyDaysAgo } },
+      orderBy: { date: 'asc' }
+    });
+
+    const tasksCount = await prisma.task.count({ where: { userId, status: 'COMPLETED' } });
+    const goalsCount = await prisma.goal.count({ where: { userId, status: 'COMPLETED' } });
+    const journalsCount = await prisma.journalEntry.count({ where: { userId } });
+
+    res.json({
+      loginCount: user.loginCount,
+      lastLogin: user.lastLogin,
+      streak: user.streak,
+      tasksCompleted: tasksCount,
+      goalsCompleted: goalsCount,
+      journalsCount,
+      weeklyLogs,
+      monthlyLogs
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Error fetching activity' });
+  }
+});
+
 // Dashboard Aggregation API
 app.get('/api/dashboard', async (req: AuthenticatedRequest, res) => {
   const userId = req.userId!;
   try {
-    const today = new Date();
-    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const userRecord = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { streak: true, timezone: true }
+    });
+    const tz = userRecord?.timezone || 'UTC';
+    const midnight = getLocalMidnight(tz);
+    const startOfToday = midnight;
 
     // Get current life score history
     const latestScore = await prisma.lifeScoreHistory.findFirst({
@@ -185,9 +526,32 @@ app.get('/api/dashboard', async (req: AuthenticatedRequest, res) => {
     });
     const totalExpensesToday = expensesToday.reduce((sum, e) => sum + e.amount, 0);
 
+    // Find next goal reminder (nearest incomplete goal deadline)
+    const nextGoal = await prisma.goal.findFirst({
+      where: {
+        userId,
+        status: { not: 'COMPLETED' },
+        deadline: { not: null }
+      },
+      orderBy: { deadline: 'asc' }
+    });
+
+    // Find recent achievements
+    const userAchievements = await prisma.userAchievement.findMany({
+      where: { userId },
+      include: { achievement: true },
+      orderBy: { unlockedAt: 'desc' },
+      take: 3
+    });
+
+    // Today's progress log
+    const progressToday = await prisma.progress.findUnique({
+      where: { userId_date: { userId, date: midnight } }
+    });
+
     res.json({
       lifeScore: latestScore?.overallScore || 78,
-      streakCount: habits.length > 0 ? Math.max(...habits.map(h => h.streakCount), 0) : 0,
+      streakCount: userRecord?.streak || 0,
       latestMood: mood?.emoji || '😊',
       latestSleepScore: sleep?.sleepScore || 85,
       latestSleepDurationHours: sleep ? (sleep.durationMinutes / 60).toFixed(1) : '7.5',
@@ -201,6 +565,16 @@ app.get('/api/dashboard', async (req: AuthenticatedRequest, res) => {
       tasksTotal: tasks.length,
       habitsCompletedToday: habitLogsToday.filter(hl => hl.status === 'COMPLETED').length,
       habitsTotal: habits.length,
+      productivityScore: progressToday?.productivityScore || 0,
+      nextGoalReminder: nextGoal ? { title: nextGoal.title, deadline: nextGoal.deadline } : null,
+      recentAchievements: userAchievements.map(ua => ({
+        id: ua.achievement.id,
+        title: ua.achievement.title,
+        description: ua.achievement.description,
+        xpReward: ua.achievement.xpReward,
+        unlockedAt: ua.unlockedAt
+      })),
+      completionPercent: tasks.length > 0 ? Math.round((tasks.filter(t => t.status === 'COMPLETED').length / tasks.length) * 100) : 0
     });
   } catch (error) {
     res.status(500).json({ error: 'Error building dashboard metrics' });
@@ -244,6 +618,7 @@ app.post('/api/goals', async (req: AuthenticatedRequest, res) => {
       },
     });
 
+    await updateDailyProgress(req.userId!);
     res.status(201).json(goal);
   } catch (error) {
     res.status(500).json({ error: 'Error creating goal' });
@@ -265,6 +640,7 @@ app.put('/api/goals/:id', async (req: AuthenticatedRequest, res) => {
         deadline: deadline ? new Date(deadline) : null,
       },
     });
+    await updateDailyProgress(req.userId!);
     res.json(goal);
   } catch (error) {
     res.status(500).json({ error: 'Error updating goal' });
@@ -325,6 +701,7 @@ app.post('/api/tasks', async (req: AuthenticatedRequest, res) => {
       },
     });
 
+    await updateDailyProgress(req.userId!);
     res.status(201).json({
       ...task,
       estimatedTimeMs: task.estimatedTimeMs ? task.estimatedTimeMs.toString() : null,
@@ -366,6 +743,7 @@ app.put('/api/tasks/:id', async (req: AuthenticatedRequest, res) => {
       });
     }
 
+    await updateDailyProgress(req.userId!);
     res.json({
       ...task,
       estimatedTimeMs: task.estimatedTimeMs ? task.estimatedTimeMs.toString() : null,
@@ -378,6 +756,7 @@ app.put('/api/tasks/:id', async (req: AuthenticatedRequest, res) => {
 app.delete('/api/tasks/:id', async (req: AuthenticatedRequest, res) => {
   try {
     await prisma.task.delete({ where: { id: req.params.id } });
+    await updateDailyProgress(req.userId!);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error deleting task' });
@@ -1009,4 +1388,6 @@ app.get('*', (req, res) => {
 // Bind to 0.0.0.0 so Render can route external traffic
 app.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`[LifeOS AI Server] Running on port ${PORT}`);
+  // Start background notification scheduler
+  startNotificationScheduler();
 });

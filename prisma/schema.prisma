@@ -44,6 +44,15 @@ model User {
   predictions      Prediction[]
   lifeScores       LifeScoreHistory[]
   deviceTokens     DeviceToken[]
+  notificationEnabled Boolean         @default(true)
+  reminderTimes       String          @default("09:00,14:00,20:00")
+  loginCount          Int             @default(0)
+  lastLogin           DateTime?
+  streak              Int             @default(0)
+  authProvider        String          @default("EMAIL")
+  profilePicture      String?
+  notificationHistory String?
+  progressLogs        Progress[]
 }
 
 model ProfileSetup {
@@ -354,4 +363,16 @@ model DeviceToken {
   token      String
   deviceType String
   createdAt  DateTime @default(now())
+}
+
+model Progress {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date              DateTime
+  completedTasks    Int      @default(0)
+  completedGoals    Int      @default(0)
+  productivityScore Int      @default(0)
+
+  @@unique([userId, date])
 }

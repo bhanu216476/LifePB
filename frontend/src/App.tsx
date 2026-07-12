@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import Sidebar from './components/Sidebar';
 import AIOrb from './components/AIOrb';
+import NotificationBell from './components/NotificationBell';
 
 import AuthPage from './pages/AuthPage';
 import SetupWizardPage from './pages/SetupWizardPage';
@@ -16,6 +17,7 @@ import LearningPage from './pages/LearningPage';
 import DigitalHabitsPage from './pages/DigitalHabitsPage';
 import FitnessPage from './pages/FitnessPage';
 import JournalPage from './pages/JournalPage';
+import SettingsPage from './pages/SettingsPage';
 
 // Protected Route wrapper
 const ProtectedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -24,7 +26,12 @@ const ProtectedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen text-white">
-        <div className="text-sm font-mono text-white/50 animate-pulse">Synchronizing neural interface...</div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center animate-pulse shadow-lg shadow-indigo-500/30">
+            <span className="font-black text-white text-xl">L</span>
+          </div>
+          <div className="text-sm font-mono text-white/50 animate-pulse">Synchronizing neural interface...</div>
+        </div>
       </div>
     );
   }
@@ -37,12 +44,16 @@ const ProtectedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
     <div className="flex min-h-screen bg-[#050816] text-[#f3f4f6]">
       {/* Background glow effects */}
       <div id="ambient-glows" />
-      
+
       {/* Sidebar Menu */}
       <Sidebar />
 
       {/* Main page content area */}
-      <div className="flex-1 min-h-screen">
+      <div className="flex-1 min-h-screen relative">
+        {/* Notification Bell – floating top-right inside main content area */}
+        <div className="fixed top-5 right-6 z-50">
+          <NotificationBell />
+        </div>
         {children}
       </div>
 
@@ -60,7 +71,7 @@ const App: React.FC = () => {
           <Routes>
             {/* Public Routes */}
             <Route path="/login" element={<AuthPage />} />
-            
+
             {/* Setup Wizard */}
             <Route path="/setup" element={
               <ProtectedLayout>
@@ -112,6 +123,11 @@ const App: React.FC = () => {
             <Route path="/journal" element={
               <ProtectedLayout>
                 <JournalPage />
+              </ProtectedLayout>
+            } />
+            <Route path="/settings" element={
+              <ProtectedLayout>
+                <SettingsPage />
               </ProtectedLayout>
             } />
 

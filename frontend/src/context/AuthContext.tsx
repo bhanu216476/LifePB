@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'https://lifeos-ai-backend.onrender.com';
 
 interface User {
   id: string;
@@ -7,6 +9,11 @@ interface User {
   age?: number | null;
   occupation?: string | null;
   timezone?: string | null;
+  streak?: number;
+  notificationEnabled?: boolean;
+  reminderTimes?: string;
+  authProvider?: string;
+  profilePicture?: string | null;
   profileSetup?: {
     preferredWorkingHoursStart?: string;
     preferredWorkingHoursEnd?: string;
@@ -21,7 +28,8 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<{ user: User }>;
+  loginWithGoogle: (credential: string, timezone?: string) => Promise<{ user: User; isNew: boolean }>;
   register: (data: { email: string; name: string; age?: string; occupation?: string; timezone?: string; password?: string }) => Promise<void>;
   logout: () => void;
   updateProfile: (data: Partial<User> & { preferredWorkingHoursStart?: string; preferredWorkingHoursEnd?: string; lifeGoals?: string; skills?: string; interests?: string }) => Promise<void>;
@@ -35,27 +43,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(localStorage.getItem('lifeos_token'));
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (token) {
-      fetchProfile();
-    } else {
-      setLoading(false);
-    }
-  }, [token]);
+  const logout = useCallback(() => {
+    localStorage.removeItem('lifeos_token');
+    setToken(null);
+    setUser(null);
+    setLoading(false);
+  }, []);
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async (authToken: string) => {
     try {
-      const response = await fetch('http://localhost:5000/api/auth/profile', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      const response = await fetch(`${API_BASE}/api/auth/profile`, {
+        headers: { 'Authorization': `Bearer ${authToken}` },
       });
-
       if (response.ok) {
         const data = await response.json();
         setUser(data);
-      } else {
-        // Token might be invalid/expired
+      } else if (response.status === 401 || response.status === 403) {
+        // Token expired or invalid - silently log out
         logout();
       }
     } catch (error) {
@@ -63,49 +67,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setLoading(false);
     }
-  };
+  }, [logout]);
 
-  const login = async (email: string, password: string) => {
-    const response = await fetch('http://localhost:5000/api/auth/login', {
+  // On mount – validate persisted token
+  useEffect(() => {
+    if (token) {
+      fetchProfile(token);
+    } else {
+      setLoading(false);
+    }
+  }, []); // Only on mount
+
+  const login = async (email: string, password: string): Promise<{ user: User }> => {
+    const response = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || 'Login failed');
-    }
+    if (!response.ok) throw new Error(data.error || 'Login failed');
 
     localStorage.setItem('lifeos_token', data.token);
     setToken(data.token);
+    setUser(data.user);
+    return { user: data.user };
+  };
+
+  const loginWithGoogle = async (credential: string, timezone?: string): Promise<{ user: User; isNew: boolean }> => {
+    const tz = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const response = await fetch(`${API_BASE}/api/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential, timezone: tz }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Google login failed');
+
+    const isNew = !data.user.loginCount || data.user.loginCount <= 1;
+    localStorage.setItem('lifeos_token', data.token);
+    setToken(data.token);
+    setUser(data.user);
+    return { user: data.user, isNew };
   };
 
   const register = async (regData: any) => {
-    const response = await fetch('http://localhost:5000/api/auth/register', {
+    const response = await fetch(`${API_BASE}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(regData),
     });
-
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || 'Registration failed');
-    }
+    if (!response.ok) throw new Error(data.error || 'Registration failed');
 
     localStorage.setItem('lifeos_token', data.token);
     setToken(data.token);
-  };
-
-  const logout = () => {
-    localStorage.removeItem('lifeos_token');
-    setToken(null);
-    setUser(null);
-    setLoading(false);
+    setUser(data.user);
   };
 
   const updateProfile = async (profileData: any) => {
-    const response = await fetch('http://localhost:5000/api/auth/profile', {
+    const response = await fetch(`${API_BASE}/api/auth/profile`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -113,16 +133,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       },
       body: JSON.stringify(profileData),
     });
-
     const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || 'Profile update failed');
-    }
+    if (!response.ok) throw new Error(data.error || 'Profile update failed');
     setUser(data);
   };
 
   const refreshProfile = async () => {
-    await fetchProfile();
+    if (token) await fetchProfile(token);
   };
 
   return (
@@ -133,6 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!token && !!user,
         loading,
         login,
+        loginWithGoogle,
         register,
         logout,
         updateProfile,
@@ -146,8 +164,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
