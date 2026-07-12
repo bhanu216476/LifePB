@@ -2,9 +2,11 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { LiaProvider } from './context/LiaContext';
 import Sidebar from './components/Sidebar';
 import AIOrb from './components/AIOrb';
 import NotificationBell from './components/NotificationBell';
+import LiaCompanion from './components/LiaCompanion';
 
 import AuthPage from './pages/AuthPage';
 import SetupWizardPage from './pages/SetupWizardPage';
@@ -59,6 +61,9 @@ const ProtectedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
       {/* Floating AI Orb */}
       <AIOrb />
+
+      {/* 3D Lia Desktop Toy Companion */}
+      <LiaCompanion />
     </div>
   );
 };
@@ -68,72 +73,74 @@ const App: React.FC = () => {
     <BrowserRouter>
       <AuthProvider>
         <NotificationProvider>
-          <Routes>
-            {/* Public Routes */}
-            <Route path="/login" element={<AuthPage />} />
+          <LiaProvider>
+            <Routes>
+              {/* Public Routes */}
+              <Route path="/login" element={<AuthPage />} />
 
-            {/* Setup Wizard */}
-            <Route path="/setup" element={
-              <ProtectedLayout>
-                <SetupWizardPage />
-              </ProtectedLayout>
-            } />
+              {/* Setup Wizard */}
+              <Route path="/setup" element={
+                <ProtectedLayout>
+                  <SetupWizardPage />
+                </ProtectedLayout>
+              } />
 
-            {/* Protected Routes */}
-            <Route path="/dashboard" element={
-              <ProtectedLayout>
-                <DashboardPage />
-              </ProtectedLayout>
-            } />
-            <Route path="/goals" element={
-              <ProtectedLayout>
-                <GoalsPage />
-              </ProtectedLayout>
-            } />
-            <Route path="/tasks" element={
-              <ProtectedLayout>
-                <TasksPage />
-              </ProtectedLayout>
-            } />
-            <Route path="/habits" element={
-              <ProtectedLayout>
-                <HabitsPage />
-              </ProtectedLayout>
-            } />
-            <Route path="/sleep-mood" element={
-              <ProtectedLayout>
-                <SleepMoodPage />
-              </ProtectedLayout>
-            } />
-            <Route path="/learning" element={
-              <ProtectedLayout>
-                <LearningPage />
-              </ProtectedLayout>
-            } />
-            <Route path="/digital-habits" element={
-              <ProtectedLayout>
-                <DigitalHabitsPage />
-              </ProtectedLayout>
-            } />
-            <Route path="/fitness" element={
-              <ProtectedLayout>
-                <FitnessPage />
-              </ProtectedLayout>
-            } />
-            <Route path="/journal" element={
-              <ProtectedLayout>
-                <JournalPage />
-              </ProtectedLayout>
-            } />
-            <Route path="/settings" element={
-              <ProtectedLayout>
-                <SettingsPage />
-              </ProtectedLayout>
-            } />
+              {/* Protected Routes */}
+              <Route path="/dashboard" element={
+                <ProtectedLayout>
+                  <DashboardPage />
+                </ProtectedLayout>
+              } />
+              <Route path="/goals" element={
+                <ProtectedLayout>
+                  <GoalsPage />
+                </ProtectedLayout>
+              } />
+              <Route path="/tasks" element={
+                <ProtectedLayout>
+                  <TasksPage />
+                </ProtectedLayout>
+              } />
+              <Route path="/habits" element={
+                <ProtectedLayout>
+                  <HabitsPage />
+                </ProtectedLayout>
+              } />
+              <Route path="/sleep-mood" element={
+                <ProtectedLayout>
+                  <SleepMoodPage />
+                </ProtectedLayout>
+              } />
+              <Route path="/learning" element={
+                <ProtectedLayout>
+                  <LearningPage />
+                </ProtectedLayout>
+              } />
+              <Route path="/digital-habits" element={
+                <ProtectedLayout>
+                  <DigitalHabitsPage />
+                </ProtectedLayout>
+              } />
+              <Route path="/fitness" element={
+                <ProtectedLayout>
+                  <FitnessPage />
+                </ProtectedLayout>
+              } />
+              <Route path="/journal" element={
+                <ProtectedLayout>
+                  <JournalPage />
+                </ProtectedLayout>
+              } />
+              <Route path="/settings" element={
+                <ProtectedLayout>
+                  <SettingsPage />
+                </ProtectedLayout>
+              } />
 
-            {/* Default redirect to Dashboard */}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
+              {/* Default redirect to Dashboard */}
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </LiaProvider>
         </NotificationProvider>
       </AuthProvider>
     </BrowserRouter>

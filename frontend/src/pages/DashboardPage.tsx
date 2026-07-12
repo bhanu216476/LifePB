@@ -142,6 +142,10 @@ const DashboardPage: React.FC = () => {
       if (res.ok) {
         triggerToast('Task Completed! ✅', 'XP Reward Unlocked (+50 XP)', 'success');
         triggerConfetti();
+        // Dispatch Lia task completed event
+        window.dispatchEvent(new CustomEvent('lia-event', {
+          detail: { type: 'task-completed', text: "Great job completing that task! Keep going!" }
+        }));
         fetchDashboardData();
       }
     } catch (err) { console.error(err); }
