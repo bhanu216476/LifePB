@@ -16,6 +16,7 @@
     "canvas-confetti": "^1.9.4",
     "framer-motion": "^12.42.2",
     "gsap": "^3.15.0",
+    "lifeos-ai-backend": "file:..",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
