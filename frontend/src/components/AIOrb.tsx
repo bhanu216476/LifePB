@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { speakWithLadyVoice, stopSpeaking } from '../utils/speech';
 import { BrainCircuit, Activity, RefreshCw, X, TrendingUp, Send, Volume2, VolumeX, Mic } from 'lucide-react';
+import { parseLiaResponse } from '../utils/liaAIEngine';
 
 interface Insight {
   text: string;
@@ -16,57 +17,73 @@ interface Prediction {
 }
 
 const AIOrb: React.FC = () => {
-  const { token, isAuthenticated } = useAuth();
+  const { token, isAuthenticated, user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'insights' | 'predictions' | 'chatbot'>('insights');
   const [chatInput, setChatInput] = useState('');
-  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'assistant'; text: string }>>([
-    { sender: 'assistant', text: 'Hello! I am your LifeOS voice intelligence assistant. Ask me anything about your habits, sleep routines, or pending tasks.' }
+  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'assistant'; text: string; time: string }>>([
+    { sender: 'assistant', text: 'Hello! I am Lia, your LifeOS voice intelligence companion. Ask me anything about your habits, sleep, or pending tasks.', time: new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) }
   ]);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(true);
+  const [typing, setTyping] = useState(false);
+
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, typing]);
 
   // Stop speaking when drawer closes
   useEffect(() => {
     if (!isOpen) {
       stopSpeaking();
     }
+    window.dispatchEvent(new CustomEvent('ai-orb-toggle', { detail: { isOpen } }));
   }, [isOpen]);
 
   const handleSendChat = () => {
     if (!chatInput.trim()) return;
 
     const userMsg = chatInput.trim();
-    setChatMessages(prev => [...prev, { sender: 'user', text: userMsg }]);
+    const timeStr = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    setChatMessages(prev => [...prev, { sender: 'user', text: userMsg, time: timeStr }]);
     setChatInput('');
+    setTyping(true);
 
-    // Simulated response matching user data keywords
+    // Map chatMessages list to liaAIEngine format
+    const historyMapped = chatMessages.map(m => ({
+      sender: m.sender,
+      text: m.text,
+      timestamp: new Date(),
+    }));
+
     setTimeout(() => {
-      let replyText = '';
-      const query = userMsg.toLowerCase();
+      const { reply, state } = parseLiaResponse(
+        userMsg,
+        historyMapped,
+        user?.name || 'Operator',
+        user?.streak || 0
+      );
 
-      if (query.includes('sleep') || query.includes('recovery')) {
-        replyText = 'Your circadian sleep recovery score is high. I recommend maintaining a consistent sleep window to align with your focus cycles.';
-      } else if (query.includes('habit') || query.includes('routine')) {
-        replyText = 'Your habits are exceptionally consistent. Keep completing mindfulness logs to secure level up milestones.';
-      } else if (query.includes('task') || query.includes('todo')) {
-        replyText = 'You have pending backlog directives. Complete high priority items to unlock productivity XP rewards.';
-      } else if (query.includes('score') || query.includes('overall') || query.includes('life')) {
-        replyText = 'Your overall Life Score aggregation is optimal. Sustain step goals and hydration levels to locks in these aggregates.';
-      } else if (query.includes('hello') || query.includes('hi') || query.includes('hey')) {
-        replyText = 'Greetings. I am ready. Ask me about your tasks, habits, screen time distraction score, or recovery levels.';
-      } else {
-        replyText = 'I have analyzed your recent activities. Focus on completing your daily routine and maintaining your step targets to optimize performance.';
-      }
+      const responseTimeStr = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      setChatMessages(prev => [...prev, { sender: 'assistant', text: reply, time: responseTimeStr }]);
+      setTyping(false);
 
-      setChatMessages(prev => [...prev, { sender: 'assistant', text: replyText }]);
+      // Trigger companion state update so Lia animates synchronously!
+      window.dispatchEvent(new CustomEvent('lia-event', {
+        detail: { type: 'chat-response', text: reply, state }
+      }));
 
       if (voiceOutputEnabled) {
-        speakWithLadyVoice(replyText);
+        speakWithLadyVoice(reply);
       }
-    }, 600);
+    }, 1100);
   };
 
   const fetchAIData = async () => {
@@ -216,22 +233,40 @@ const AIOrb: React.FC = () => {
                   </div>
 
                   {/* Message stream */}
-                  <div className="flex flex-col gap-3 flex-1 overflow-y-auto max-h-96 pr-1">
+                  <div className="flex flex-col gap-4 flex-1 overflow-y-auto max-h-[360px] pr-1 scrollbar-thin">
                     {chatMessages.map((msg, idx) => (
-                      <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        {msg.sender === 'assistant' && (
-                          <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#06B6D4] to-cyan-400 flex items-center justify-center text-black shrink-0 mr-2 mt-0.5">
-                            <Mic size={13} />
+                      <div key={idx} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                        <div className="flex items-end gap-2 max-w-[85%]">
+                          {msg.sender === 'assistant' && (
+                            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#d7c19e] to-[#f4ecd8] border border-[#5c4033]/20 flex flex-col items-center justify-center shrink-0 shadow-md">
+                              <span className="text-[14px]" title="Lia Face">🤖</span>
+                            </div>
+                          )}
+                          <div className={`px-4 py-2.5 rounded-[18px] text-xs leading-relaxed shadow-sm border
+                            ${msg.sender === 'user' 
+                              ? 'bg-[#6366F1]/15 border-[#6366F1]/20 text-white rounded-br-none' 
+                              : 'bg-cyan-950/40 border-cyan-800/10 text-white/95 rounded-bl-none'}`}>
+                            {msg.text}
                           </div>
-                        )}
-                        <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-xs leading-relaxed
-                          ${msg.sender === 'user' 
-                            ? 'bg-[#6366F1]/20 border border-[#6366F1]/30 text-white rounded-br-sm' 
-                            : 'bg-cyan-950/50 border border-cyan-800/20 text-white/90 rounded-bl-sm'}`}>
-                          {msg.text}
                         </div>
+                        <span className="text-[9px] text-white/30 mt-1 px-1 font-mono">{msg.time}</span>
                       </div>
                     ))}
+
+                    {/* Animated Typing Indicator */}
+                    {typing && (
+                      <div className="flex items-end gap-2 max-w-[85%]">
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#d7c19e] to-[#f4ecd8] border border-[#5c4033]/20 flex items-center justify-center shrink-0 shadow-md">
+                          <span className="text-[14px]">🤖</span>
+                        </div>
+                        <div className="px-4 py-3 rounded-[18px] rounded-bl-none bg-cyan-950/20 border border-cyan-800/10 flex gap-1 items-center">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
                   </div>
 
                   {/* Input bar */}
