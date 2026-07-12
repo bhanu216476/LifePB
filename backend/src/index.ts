@@ -1380,6 +1380,217 @@ app.get('/api/lifescores', async (req: AuthenticatedRequest, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICATION ROUTES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/notifications — list all in-app notifications for the current user
+app.get('/api/notifications', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const notifications = await prisma.notification.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    res.json(notifications);
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
+// POST /api/notifications/:id/read — mark a single notification as read
+app.post('/api/notifications/:id/read', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const notification = await prisma.notification.findFirst({
+      where: { id, userId: req.userId },
+    });
+    if (!notification) return res.status(404).json({ error: 'Notification not found' });
+
+    const updated = await prisma.notification.update({
+      where: { id },
+      data: { isRead: true },
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('Error marking notification read:', error);
+    res.status(500).json({ error: 'Failed to mark notification as read' });
+  }
+});
+
+// POST /api/notifications/read-all — mark all notifications as read
+app.post('/api/notifications/read-all', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    await prisma.notification.updateMany({
+      where: { userId: req.userId, isRead: false },
+      data: { isRead: true },
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error marking all read:', error);
+    res.status(500).json({ error: 'Failed to mark all notifications as read' });
+  }
+});
+
+// GET /api/notifications/settings — get current user's notification preferences
+app.get('/api/notifications/settings', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: { notificationEnabled: true, reminderTimes: true },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching notification settings:', error);
+    res.status(500).json({ error: 'Failed to fetch notification settings' });
+  }
+});
+
+// POST /api/notifications/settings — update notification preferences
+app.post('/api/notifications/settings', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { notificationEnabled, reminderTimes } = req.body;
+    const updated = await prisma.user.update({
+      where: { id: req.userId },
+      data: {
+        ...(typeof notificationEnabled === 'boolean' && { notificationEnabled }),
+        ...(typeof reminderTimes === 'string' && { reminderTimes }),
+      },
+      select: { notificationEnabled: true, reminderTimes: true },
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('Error saving notification settings:', error);
+    res.status(500).json({ error: 'Failed to save notification settings' });
+  }
+});
+
+// GET /api/notifications/vapid-key — return VAPID public key for push subscription
+app.get('/api/notifications/vapid-key', authenticateToken, (_req, res) => {
+  try {
+    const publicKey = getPublicKey();
+    res.json({ publicKey });
+  } catch (error) {
+    console.error('Error getting VAPID key:', error);
+    res.status(500).json({ error: 'VAPID key not available' });
+  }
+});
+
+// POST /api/notifications/subscribe — save browser push subscription
+app.post('/api/notifications/subscribe', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { subscription, deviceType = 'web' } = req.body;
+    if (!subscription) return res.status(400).json({ error: 'Subscription object is required' });
+
+    const tokenString = JSON.stringify(subscription);
+
+    // Upsert — avoid duplicates by looking for the exact same subscription endpoint
+    const existing = await prisma.deviceToken.findFirst({
+      where: { userId: req.userId, token: tokenString },
+    });
+
+    if (!existing) {
+      await prisma.deviceToken.create({
+        data: {
+          userId: req.userId!,
+          token: tokenString,
+          deviceType,
+        },
+      });
+    }
+
+    res.json({ success: true, message: 'Push subscription registered' });
+  } catch (error) {
+    console.error('Error saving push subscription:', error);
+    res.status(500).json({ error: 'Failed to register push subscription' });
+  }
+});
+
+// POST /api/notifications/unsubscribe — remove push subscription
+app.post('/api/notifications/unsubscribe', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { endpoint } = req.body;
+    if (!endpoint) return res.status(400).json({ error: 'Endpoint is required' });
+
+    // Find tokens whose JSON contains this endpoint
+    const tokens = await prisma.deviceToken.findMany({ where: { userId: req.userId } });
+    for (const t of tokens) {
+      try {
+        const parsed = JSON.parse(t.token);
+        if (parsed.endpoint === endpoint) {
+          await prisma.deviceToken.delete({ where: { id: t.id } });
+        }
+      } catch { /* skip malformed tokens */ }
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error removing push subscription:', error);
+    res.status(500).json({ error: 'Failed to remove push subscription' });
+  }
+});
+
+// POST /api/notifications/test — manually trigger a test notification for debugging
+app.post('/api/notifications/test', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    // Create a test in-app notification
+    const notification = await prisma.notification.create({
+      data: {
+        userId: req.userId!,
+        title: '🧪 Test Notification',
+        message: 'LifeOS AI notification system is working correctly!',
+        type: 'SYSTEM',
+        isRead: false,
+      },
+    });
+
+    // Also attempt to send a push notification if subscriptions exist
+    const tokens = await prisma.deviceToken.findMany({
+      where: { userId: req.userId, deviceType: 'web' },
+    });
+
+    let pushSent = 0;
+    if (tokens.length > 0) {
+      const { sendPushNotification } = await import('./services/pushService');
+      for (const t of tokens) {
+        try {
+          const ok = await sendPushNotification(t.token, {
+            title: '🧪 Test Push Notification',
+            message: 'Your LifeOS AI push notifications are working!',
+            data: { notificationId: notification.id },
+          });
+          if (ok) pushSent++;
+          else await prisma.deviceToken.delete({ where: { id: t.id } }).catch(() => {});
+        } catch { /* skip */ }
+      }
+    }
+
+    res.json({
+      success: true,
+      notificationId: notification.id,
+      pushSent,
+      message: pushSent > 0 ? `In-app + ${pushSent} push notification(s) sent` : 'In-app notification created (no push subscriptions)',
+    });
+  } catch (error) {
+    console.error('Error sending test notification:', error);
+    res.status(500).json({ error: 'Failed to send test notification' });
+  }
+});
+
+// POST /api/notifications/trigger-scheduler — manually trigger the scheduler (dev/admin)
+app.post('/api/notifications/trigger-scheduler', authenticateToken, async (_req, res) => {
+  try {
+    await checkAndSendNotifications();
+    res.json({ success: true, message: 'Scheduler run complete' });
+  } catch (error) {
+    console.error('Scheduler trigger error:', error);
+    res.status(500).json({ error: 'Scheduler run failed' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Catch-all route to serve React app for non-API requests
 app.get('*', (req, res) => {
   res.sendFile(path.join(process.cwd(), 'frontend', 'dist', 'index.html'));

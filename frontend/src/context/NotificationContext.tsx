@@ -78,6 +78,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if ('Notification' in window && Notification.permission === 'granted') {
         subscribeToPush().catch(console.warn);
       }
+      // Poll for new notifications every 30 seconds
+      const pollInterval = setInterval(() => {
+        fetchNotifications();
+      }, 30000);
+      return () => clearInterval(pollInterval);
     } else {
       setNotifications([]);
     }
@@ -113,8 +118,15 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const markAllRead = async () => {
     if (!token) return;
-    const unread = notifications.filter(n => !n.isRead);
-    await Promise.all(unread.map(n => markAsRead(n.id)));
+    try {
+      await fetch(`${API_BASE}/api/notifications/read-all`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+    }
   };
 
   // Subscribe to Web Push

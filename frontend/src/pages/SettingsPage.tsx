@@ -27,12 +27,35 @@ const SettingsPage: React.FC = () => {
   const [reminderSlots, setReminderSlots] = useState(['09:00', '14:00', '20:00']);
   const [loadingNotif, setLoadingNotif] = useState(false);
   const [savedNotif, setSavedNotif] = useState(false);
+  const [testLoading, setTestLoading] = useState(false);
 
   // Profile form state
   const [name, setName] = useState(user?.name || '');
   const [occupation, setOccupation] = useState(user?.occupation || '');
   const [timezone, setTimezone] = useState(user?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [loadingProfile, setLoadingProfile] = useState(false);
+
+  // Send a test notification to verify pipeline
+  const handleTestNotification = async () => {
+    if (!token) return;
+    setTestLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/notifications/test`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        triggerToast('Test Notification Sent ✅', data.message || 'Check the bell icon above.', 'success');
+      } else {
+        triggerToast('Test Failed', data.error || 'Notification could not be sent.', 'danger');
+      }
+    } catch {
+      triggerToast('Error', 'Network error. Check console.', 'danger');
+    } finally {
+      setTestLoading(false);
+    }
+  };
 
   // Fetch notification settings
   useEffect(() => {
@@ -185,14 +208,24 @@ const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={handleSaveNotifications}
-            disabled={loadingNotif}
-            className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 hover:opacity-90 cursor-pointer shadow-lg shadow-indigo-500/20 transition-all disabled:opacity-50"
-          >
-            {loadingNotif ? <Loader2 size={16} className="animate-spin" /> : savedNotif ? <CheckCircle2 size={16} /> : <Bell size={16} />}
-            {loadingNotif ? 'Saving...' : savedNotif ? 'Saved!' : 'Save Notification Settings'}
-          </button>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={handleSaveNotifications}
+              disabled={loadingNotif}
+              className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-indigo-600 to-purple-600 hover:opacity-90 cursor-pointer shadow-lg shadow-indigo-500/20 transition-all disabled:opacity-50"
+            >
+              {loadingNotif ? <Loader2 size={16} className="animate-spin" /> : savedNotif ? <CheckCircle2 size={16} /> : <Bell size={16} />}
+              {loadingNotif ? 'Saving...' : savedNotif ? 'Saved!' : 'Save Notification Settings'}
+            </button>
+            <button
+              onClick={handleTestNotification}
+              disabled={testLoading}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold bg-cyan-950/50 border border-cyan-800/30 text-cyan-300 hover:bg-cyan-900/30 cursor-pointer transition-all disabled:opacity-50"
+            >
+              {testLoading ? <Loader2 size={13} className="animate-spin" /> : '⚡'}
+              {testLoading ? 'Sending test...' : 'Send Test Notification (Verify Pipeline)'}
+            </button>
+          </div>
         </section>
 
         {/* ─── Profile Settings ─── */}

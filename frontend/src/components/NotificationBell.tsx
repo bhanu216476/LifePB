@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bell, X, CheckCheck, Settings } from 'lucide-react';
+import { Bell, X, CheckCheck, Settings, Zap } from 'lucide-react';
 import { useNotifications } from '../context/NotificationContext';
+import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'https://lifeos-ai-backend.onrender.com';
 
 const typeColors: Record<string, string> = {
   SMART:    'bg-cyan-500/20 text-cyan-300 border-cyan-500/20',
@@ -18,10 +21,34 @@ const typeIcons: Record<string, string> = {
 };
 
 const NotificationBell: React.FC = () => {
-  const { notifications, unreadCount, markAsRead, markAllRead, fetchNotifications } = useNotifications();
+  const { notifications, unreadCount, markAsRead, markAllRead, fetchNotifications, triggerToast } = useNotifications();
+  const { token } = useAuth();
   const [open, setOpen] = useState(false);
+  const [testLoading, setTestLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  const sendTestNotification = async () => {
+    if (!token) return;
+    setTestLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/notifications/test`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        triggerToast('Test Sent ✅', data.message || 'Test notification created.', 'success');
+        fetchNotifications();
+      } else {
+        triggerToast('Test Failed', data.error || 'Could not send test.', 'danger');
+      }
+    } catch (err) {
+      triggerToast('Error', 'Network error sending test notification.', 'danger');
+    } finally {
+      setTestLoading(false);
+    }
+  };
 
   // Close when clicking outside
   useEffect(() => {
@@ -124,12 +151,21 @@ const NotificationBell: React.FC = () => {
           </div>
 
           {/* Footer */}
-          <div className="px-4 py-2.5 border-t border-white/5 flex justify-between items-center">
+          <div className="px-4 py-2.5 border-t border-white/5 flex justify-between items-center gap-2">
             <button
               onClick={() => { setOpen(false); navigate('/settings'); }}
               className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 cursor-pointer transition-colors"
             >
-              ⚙️ Notification Settings
+              ⚙️ Settings
+            </button>
+            <button
+              onClick={sendTestNotification}
+              disabled={testLoading}
+              title="Send a test notification to verify the pipeline"
+              className="flex items-center gap-1 text-[11px] font-semibold text-cyan-400 hover:text-cyan-300 cursor-pointer transition-colors disabled:opacity-50"
+            >
+              <Zap size={11} className={testLoading ? 'animate-pulse' : ''} />
+              {testLoading ? 'Sending...' : 'Test'}
             </button>
             <button
               onClick={() => { setOpen(false); fetchNotifications(); }}
